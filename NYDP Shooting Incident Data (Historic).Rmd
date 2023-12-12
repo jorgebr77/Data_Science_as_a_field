@@ -1,0 +1,132 @@
+---
+title: "NYPD Shooting Incident Data (Historic)"
+author: "J.E.B.R."
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+## Project
+
+This project will be based on the NYPD Shooting Incident data (Historic) coming from this link: <https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD>
+We will assign the link(csv) to a variable and then read in that variable. We'll have to import first libraries as tidyverse and lubridate.
+
+### Import the data
+
+```{r import_data, message=FALSE}
+url_shooting <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+NYPD_shootings <- read_csv(url_shooting)
+NYPD_shootings
+```
+
+### Tyding and Transforming Data
+
+After we see our dataset we believe there are some columns that are not needed, like X_COORD_CD, Y_COORD_CD, Latitude, Longitude and Lon_Lat. Also, we have to change some variables to a more proper object type like date from character to date object. We also sort our date column from oldest to newest
+
+```{r remove_columns}
+NYPD_shootings <- NYPD_shootings %>%
+  select(-c(X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat)) %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>%
+  arrange(OCCUR_DATE)
+NYPD_shootings
+```
+
+Now that we don't have unnecessary columns anymore and also we have our date column as a date object, we might begin to group BORO to see how many incidents and deaths we could find in each of them creating a new dataset for that and sorting it from largest to smallest. Also, we are going to check for missing and infinite or NaN values, if there are we will remove them.
+
+```{r group_by_boro_and_Check_Missings}
+sum(is.na(NYPD_shootings$BORO))
+sum(is.na(NYPD_shootings$INCIDENT_KEY))
+sum(is.na(NYPD_shootings$STATISTICAL_MURDER_FLAG))
+nrow(na.omit(NYPD_shootings))
+shootings_by_boro <- NYPD_shootings %>%
+  group_by(BORO) %>%
+  summarize(incidents = n(), Deaths = sum(STATISTICAL_MURDER_FLAG)) %>%
+  arrange(desc(incidents)) %>%
+  ungroup()
+shootings_by_boro
+```
+
+### Visualizing and Analyzing Data
+
+We would like to work with all columns but there is too much missing information in some columns, leaving us a few incidents compared to our initial data set, We could work with the dates, boroughs and count the incidents grouping those two columns and visualize date by boroughs to see each one of those at the same time.
+Later, we could plot all boroughs with our previous data frame of shootings by borough to see the difference visually each one has in a bar graph.
+
+```{r group_by_date_and_borough}
+dates_and_boroughs <- NYPD_shootings %>%
+  group_by(OCCUR_DATE, BORO) %>%
+  summarize(incidents = n(), Deaths = sum(STATISTICAL_MURDER_FLAG)) %>%
+  ungroup()
+
+ggplot(dates_and_boroughs, aes(x = OCCUR_DATE, y = incidents, color = BORO)) +
+  geom_line() +
+  facet_wrap(~BORO, scales = "free_y") +
+  labs(title = "Incidents by Borough Over Time", x = "OCCUR_DATE", y = "incidents", color = "Borough")
+
+ggplot(dates_and_boroughs, aes(x = OCCUR_DATE, y = Deaths, color = BORO)) +
+  geom_line() +
+  facet_wrap(~BORO, scales = "free_y") +
+  labs(title = "Deaths by Borough Over Time", x = "OCCUR_DATE", y = "Deaths", color = "Borough")
+
+ggplot(shootings_by_boro, aes(x = BORO, y = incidents)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Number of Shootings by Borough", x = "Borough", y = "Number of Shootings")
+
+ggplot(shootings_by_boro, aes(x = BORO, y = Deaths)) +
+  geom_bar(stat = "identity", fill = "lightcoral") +
+  labs(title = "Number of Deaths by Borough", x = "Borough", y = "Number of Deaths")
+```
+
+### Model
+
+After we saw the difference in each borough over time and by number of incidents and deaths, we could filter the largest one and plot the incidents by date to analyze which period of time had the most incidents and deaths. We could also look at a linear model so the variable I want to look at which is deaths is predicted by incidents.
+
+```{r filter_BORO_visualize}
+filtered_borough <- dates_and_boroughs %>%
+  filter(BORO == "BROOKLYN")
+
+# Plotting the filtered data
+ggplot(filtered_borough, aes(x = OCCUR_DATE, y = incidents, color = BORO)) +
+  geom_line() +
+  labs(title = "Incidents in Brooklyn Over Time", x = "OCCUR_DATE", y = "incidents", color = "Brooklyn")
+
+ggplot(filtered_borough, aes(x = OCCUR_DATE, y = Deaths , color = BORO)) +
+  geom_line() +
+  labs(title = "Deaths in Brooklyn Over Time", x = "OCCUR_DATE", y = "Deaths", color = "Brooklyn")
+```
+
+Here is the linear model
+
+```{r model}
+model_df <- NYPD_shootings %>%
+  group_by(OCCUR_DATE) %>%
+  summarize(Incidents = n(), Deaths = sum(STATISTICAL_MURDER_FLAG))
+model_df
+  
+mod <- lm(Deaths ~ Incidents, data = model_df)
+
+# Print model summary
+summary(mod)
+
+model_df_w_pred <- model_df %>% mutate(pred = predict(mod))
+model_df_w_pred
+
+model_df_w_pred %>% ggplot()+
+geom_point(aes(x = Incidents, y = Deaths), color = "blue")+
+geom_point(aes(x = Incidents, y = pred), color = "red")
+```
+
+### Conclusion
+
+It was clear that two of the 5 boroughs were the ones that had the most number of incidents, Staten island was the lowest one in terms of incidents and deaths, between the years of 2015 and 2020 incidents were low but before 2015 incidents were high but in a stable pattern, and after 2020 spikes are seen in the graphs, probably because of the struggles the population had to face due to COVID.
+
+But, this could be a possible source of bias, we should investigate the data more deeply to see if it is actually related to that event. Another bias faced was probably the race characteristic where instead of analyzing that data it wasn't possible as there were too many missing values. That is why the data was analyzed just based on time and location.
+
+The model has a fairly good performance of predicting at the lower end and maybe at the higher end, in between it is in different places but it is clear that the incidents is an indicator of the number of deaths, there could be more factors that we would want to consider as part of the prediction.
